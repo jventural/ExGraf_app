@@ -18,7 +18,7 @@ library(dashboardthemes)
 ui <- dashboardPage(
   skin = "blue",
   dashboardHeader(
-    title = tags$div("EGAnet Shiny Dynamic", style = "font-weight:bold;")
+    title = tags$div("ExGraf Shiny", style = "font-weight:bold;")
   ),
   dashboardSidebar(
     shinyDashboardThemes(theme = "onenote"),
