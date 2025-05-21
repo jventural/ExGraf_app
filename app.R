@@ -18,7 +18,7 @@ library(dashboardthemes)
 ui <- dashboardPage(
   skin = "blue",
   dashboardHeader(
-    title = tags$div("ExGraf Shiny", style = "font-weight:bold;")
+    title = tags$div("EGAnet Shiny Dynamic", style = "font-weight:bold;")
   ),
   dashboardSidebar(
     shinyDashboardThemes(theme = "onenote"),
@@ -131,7 +131,7 @@ ui <- dashboardPage(
               )
       ),
 
-      # 4) Hierarchical Model
+      # 4) Hierarchical Model — only axes removed here
       tabItem(tabName = "hier",
               fluidRow(
                 column(width = 4,
@@ -182,6 +182,7 @@ ui <- dashboardPage(
                 )
               )
       )
+
     )
   )
 )
@@ -212,7 +213,7 @@ server <- function(input, output, session) {
     df
   })
 
-  # 1) EGA
+  # EGA Validation (theme_void for axes-free)
   ega_result <- eventReactive(input$runEGA, {
     req(filtered_data())
     ncores <- min(detectCores(FALSE),2)
@@ -229,23 +230,33 @@ server <- function(input, output, session) {
       args$resolution_parameter <- input$resolution_parameter
       args$objective_function   <- input$objective_function
     }
-    tryCatch(do.call(EGA,args),
-             error=function(e){ showNotification(e$message,type="error"); NULL })
+    tryCatch(do.call(EGA,args), error=function(e){ showNotification(e$message,type="error"); NULL })
   })
   output$plotEGA <- renderPlot({
     res <- ega_result(); req(res)
-    print(res$plot.EGA + theme_minimal() +
-            ggtitle("EGA Plot") +
-            annotate("text", x=Inf, y=-Inf,
-                     label=paste0("TEFI: ",round(res$TEFI,3)),
-                     hjust=1,vjust=-1))
+    print(
+      res$plot.EGA +
+        theme_void() +
+        annotate("text", x=Inf, y=-Inf,
+                 label=paste0("TEFI: ", round(res$TEFI,3)),
+                 hjust=1, vjust=-1)
+    )
   })
+  output$downloadEGAPlot <- downloadHandler(
+    filename="EGA_plot.jpg",
+    content=function(file){
+      ggsave(file,
+             plot=ega_result()$plot.EGA + theme_void(),
+             width=8, height=6, dpi=300, bg="white")
+    }
+  )
   output$networkLoads <- renderTable({
     res <- ega_result(); req(res)
     net.loads(res)$std %>% as.data.frame() %>% rownames_to_column("Item")
   })
   convert_EGA_to_df <- function(res) {
-    m    <- res$network; meth <- attr(m,"methods")
+    m    <- res$network
+    meth <- attr(m,"methods")
     metrics <- list(
       Model                = toupper(meth$model),
       Correlations         = meth$corr,
@@ -260,20 +271,12 @@ server <- function(input, output, session) {
       `Number of communities` = res$n.dim,
       TEFI                 = formatC(res$TEFI,format="f",digits=3)
     )
-    tibble(Index=names(metrics), Value=unlist(metrics))
+    tibble(Index=names(metrics),Value=unlist(metrics))
   }
   output$informativeTable <- renderTable({
     res <- ega_result(); req(res)
     convert_EGA_to_df(res)
   })
-  output$downloadEGAPlot <- downloadHandler(
-    filename="EGA_plot.jpg",
-    content=function(file){
-      ggsave(file,
-             plot=ega_result()$plot.EGA + theme_minimal(),
-             width=8,height=6,dpi=300)
-    }
-  )
   output$downloadNetworkLoads <- downloadHandler(
     filename="network_loads.xlsx",
     content=function(file){
@@ -290,7 +293,7 @@ server <- function(input, output, session) {
     }
   )
 
-  # 2) Reliability with progress
+  # Reliability with progress
   bootEGA_res <- eventReactive(input$runBootEGA, {
     req(filtered_data())
     withProgress(message="Running reliability analysis...", value=0, {
@@ -311,9 +314,9 @@ server <- function(input, output, session) {
         args$resolution_parameter <- input$resolution_parameter
       }
       incProgress(0.2)
-      res <- tryCatch(do.call(bootEGA,args), error=function(e) NULL)
+      res <- tryCatch(do.call(bootEGA,args), error=function(e)NULL)
       incProgress(0.6)
-      validate(need(!is.null(res), "Error in bootEGA"))
+      validate(need(!is.null(res),"Error in reliability"))
       sc <- EGAnet::dimensionStability(res)
       incProgress(0.1)
       list(boot=res, sc=sc)
@@ -334,8 +337,8 @@ server <- function(input, output, session) {
     filename="item_stability_plot.jpg",
     content=function(file){
       ggsave(file,
-             plot=bootEGA_res()$boot$stability$item.stability$plot,
-             width=8,height=6,dpi=300)
+             plot=bootEGA_res()$boot$stability$item.stability$plot + theme_minimal(),
+             width=8, height=6, dpi=300, bg="white")
     }
   )
   output$downloadStructuralConsistency <- downloadHandler(
@@ -349,13 +352,14 @@ server <- function(input, output, session) {
     }
   )
 
-  # 3) Invariance with progress
+  # Measurement Invariance with progress
   invariance_res <- eventReactive(input$runInvariance, {
     req(data_bfi(), input$groupColumn)
     withProgress(message="Running invariance analysis...", value=0, {
       incProgress(0.1)
-      df  <- data_bfi()[ , !names(data_bfi())%in%input$groupColumn]
-      if (!is.null(input$removeItemsManual)) df <- df[ , !names(df)%in%input$removeItemsManual]
+      df  <- data_bfi()[ , !names(data_bfi()) %in% input$groupColumn]
+      if (!is.null(input$removeItemsManual))
+        df <- df[ , !names(df) %in% input$removeItemsManual]
       grp <- data_bfi()[[input$groupColumn]]
       incProgress(0.2)
       res <- tryCatch(
@@ -372,10 +376,10 @@ server <- function(input, output, session) {
           configural.threshold  = input$configural_threshold,
           ncores                = min(detectCores(FALSE),2)
         ),
-        error=function(e) NULL
+        error=function(e)NULL
       )
       incProgress(0.7)
-      validate(need(!is.null(res), "Error in invariance"))
+      validate(need(!is.null(res),"Error in invariance"))
       res
     })
   })
@@ -392,21 +396,21 @@ server <- function(input, output, session) {
     content=function(file){
       ggsave(file,
              plot=plot(invariance_res(), p_type=input$p_type, p_value=input$p_value),
-             width=8,height=6,dpi=300)
+             width=8, height=6, dpi=300, bg="white")
     }
   )
   output$downloadInvarianceTable <- downloadHandler(
     filename="invariance_results.xlsx",
     content=function(file){
-      write.xlsx(invariance_res()$results,file)
+      write.xlsx(invariance_res()$results, file)
     }
   )
 
-  # 4) Hierarchical EGA
+  # Hierarchical EGA — now axes removed
   hier_res <- reactive({
     req(filtered_data())
-    tryCatch(EGAnet::hierEGA(filtered_data(),scores="network",plot.EGA=TRUE),
-             error=function(e)NULL)
+    tryCatch(EGAnet::hierEGA(filtered_data(), scores="network", plot.EGA=TRUE),
+             error = function(e) NULL)
   })
   output$plotHierEGA <- renderPlot({
     hr <- hier_res()
@@ -414,16 +418,24 @@ server <- function(input, output, session) {
       output$hierEGAError <- renderText("Cannot generate hierarchical model.")
       return()
     }
-    print(hr$plot.hierEGA + theme_minimal() + ggtitle("Hierarchical EGA Plot"))
+    print(
+      hr$plot.hierEGA +
+        theme_void() +
+        ggtitle("Hierarchical EGA Plot")
+    )
   })
   output$downloadHierEGAPlot <- downloadHandler(
     filename="hierEGA_plot.jpg",
     content=function(file){
-      ggsave(file, plot=hier_res()$plot.hierEGA, width=8, height=6, dpi=300)
+      ggsave(
+        file,
+        plot = hier_res()$plot.hierEGA + theme_void(),
+        width = 8, height = 6, dpi = 300, bg = "white"
+      )
     }
   )
 
-  # 5) Wording Effects
+  # Wording Effects (theme_void)
   observeEvent(input$runWordingEffects, {
     req(filtered_data())
     result <- tryCatch(
@@ -432,25 +444,33 @@ server <- function(input, output, session) {
             seed=as.numeric(input$seed), ncores=min(detectCores(FALSE),2)),
       error=function(e)e
     )
-    if (inherits(result,"error")||is.null(result$Plot.EGA)) {
+    if (inherits(result,"error") || is.null(result$Plot.EGA)) {
       output$wordingEffectsError <- renderText("Unable to generate Wording Effects with these data")
       output$plotWordingEffects  <- renderPlot(NULL)
       output$downloadWordingEffectsPlot <- renderUI(NULL)
     } else {
       output$wordingEffectsError <- renderText(NULL)
       output$plotWordingEffects <- renderPlot({
-        print(result$Plot.EGA + theme_minimal() + ggtitle("Wording Effects EGA Plot"))
-      }, height=600)
+        print(
+          result$Plot.EGA +
+            theme_void() +
+            ggtitle("Wording Effects EGA Plot")
+        )
+      }, height = 600)
       output$downloadWordingEffectsPlot <- downloadHandler(
         filename="wording_effects_plot.jpg",
         content=function(file){
-          ggsave(file, plot=result$Plot.EGA + theme_minimal(), width=8, height=6, dpi=300)
+          ggsave(
+            file,
+            plot = result$Plot.EGA + theme_void(),
+            width=8, height=6, dpi=300, bg="white"
+          )
         }
       )
     }
   })
 
-  # 6) UVA
+  # UVA
   output$uvaSummary <- renderText({
     req(filtered_data())
     res <- UVA(filtered_data())
@@ -460,6 +480,7 @@ server <- function(input, output, session) {
       paste("Remove item(s):", paste(res$keep_remove$remove, collapse = ", "))
     }
   })
+
 }
 
 shinyApp(ui, server)
