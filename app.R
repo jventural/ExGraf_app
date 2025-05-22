@@ -23,7 +23,11 @@ ui <- dashboardPage(
   dashboardSidebar(
     shinyDashboardThemes(theme = "onenote"),
     useShinyjs(),
-    fileInput("file", "Upload Excel file with test items", accept = ".xlsx"),
+    fileInput(
+      "file",
+      "Upload Excel (.xlsx) or CSV (.csv)",
+      accept = c(".xlsx", ".csv")
+    ),
     uiOutput("groupColumnUI"),
     pickerInput(
       "removeItemsManual", "Select items to remove",
@@ -60,7 +64,12 @@ ui <- dashboardPage(
                                           pickerInput("objective_function","Objective Function",
                                                       choices = c("CPM","modularity"))
                          ),
-                         actionBttn("runEGA","Run EGA", style="stretch", color="success", icon=icon("play"))
+                         actionBttn("runEGA","Run EGA", style="stretch", color="success", icon=icon("play")),
+                         hr(),
+                         h5("Download Settings"),
+                         numericInput("widthEGA", "Width (inches):", 8, min = 1),
+                         numericInput("heightEGA","Height (inches):",6, min = 1),
+                         numericInput("dpiEGA",   "Resolution (dpi):",300, min = 50)
                        ),
                        box(
                          title = "Informative Table", status = "primary", solidHeader = TRUE,
@@ -91,7 +100,12 @@ ui <- dashboardPage(
                          numericInput("iter","Iterations",value=100,min=1),
                          numericInput("seed","Seed",value=2024,min=1),
                          pickerInput("type","Bootstrapping type",choices=c("resampling","parametric")),
-                         actionBttn("runBootEGA","Run Reliability",style="stretch", color="warning", icon=icon("play"))
+                         actionBttn("runBootEGA","Run Reliability",style="stretch", color="warning", icon=icon("play")),
+                         hr(),
+                         h5("Download Settings"),
+                         numericInput("widthBoot","Width (inches):",8, min=1),
+                         numericInput("heightBoot","Height (inches):",6, min=1),
+                         numericInput("dpiBoot","Resolution (dpi):",300, min=50)
                        )
                 ),
                 column(width = 8,
@@ -116,7 +130,12 @@ ui <- dashboardPage(
                          pickerInput("p_type","p adjustment",choices=c("BH"="p_BH","none"="p")),
                          numericInput("p_value","p-value",value=0.05,step=0.01),
                          numericInput("configural_threshold","Configural threshold",value=0.70,step=0.01),
-                         actionBttn("runInvariance","Run Invariance",style="stretch", color="danger", icon=icon("play"))
+                         actionBttn("runInvariance","Run Invariance",style="stretch", color="danger", icon=icon("play")),
+                         hr(),
+                         h5("Download Settings"),
+                         numericInput("widthInv","Width (inches):",8, min=1),
+                         numericInput("heightInv","Height (inches):",6, min=1),
+                         numericInput("dpiInv","Resolution (dpi):",300, min=50)
                        )
                 ),
                 column(width = 8,
@@ -131,14 +150,19 @@ ui <- dashboardPage(
               )
       ),
 
-      # 4) Hierarchical Model — only axes removed here
+      # 4) Hierarchical Model
       tabItem(tabName = "hier",
               fluidRow(
                 column(width = 4,
                        box(
                          title="Hierarchical EGA", status="info", solidHeader=TRUE,
                          collapsible=TRUE, width=NULL,
-                         helpText("Calculates hierEGA automatically.")
+                         helpText("Calculates hierEGA automatically."),
+                         hr(),
+                         h5("Download Settings"),
+                         numericInput("widthHier","Width (inches):",8, min=1),
+                         numericInput("heightHier","Height (inches):",6, min=1),
+                         numericInput("dpiHier","Resolution (dpi):",300, min=50)
                        )
                 ),
                 column(width = 8,
@@ -158,7 +182,12 @@ ui <- dashboardPage(
                        box(
                          title="Wording Effects", status="success", solidHeader=TRUE,
                          collapsible=TRUE, width=NULL,
-                         actionBttn("runWordingEffects","Run Wording Effects",style="stretch", color="success", icon=icon("play"))
+                         actionBttn("runWordingEffects","Run Wording Effects",style="stretch", color="success", icon=icon("play")),
+                         hr(),
+                         h5("Download Settings"),
+                         numericInput("widthWord","Width (inches):",8, min=1),
+                         numericInput("heightWord","Height (inches):",6, min=1),
+                         numericInput("dpiWord","Resolution (dpi):",300, min=50)
                        )
                 ),
                 column(width = 8,
@@ -189,15 +218,25 @@ ui <- dashboardPage(
 
 server <- function(input, output, session) {
 
-  # Load data & dynamic UI
+  # Load data, auto-detect CSV delimiter
   data_bfi <- reactive({
     req(input$file)
-    read_excel(input$file$datapath)
+    ext <- tools::file_ext(input$file$datapath)
+    if (tolower(ext) == "csv") {
+      hdr <- readLines(input$file$datapath, n = 1)
+      sep <- if (grepl(";", hdr)) ";" else ","
+      read.csv(input$file$datapath, sep = sep, header = TRUE,
+               stringsAsFactors = FALSE, check.names = FALSE)
+    } else {
+      read_excel(input$file$datapath)
+    }
   })
+
   output$groupColumnUI <- renderUI({
     req(data_bfi())
-    selectInput("groupColumn","Select group column",choices=names(data_bfi()))
+    selectInput("groupColumn","Select group column",choices = names(data_bfi()))
   })
+
   observeEvent(data_bfi(), {
     updatePickerInput(session,"removeItemsManual",
                       choices  = setdiff(names(data_bfi()), input$groupColumn),
@@ -206,14 +245,15 @@ server <- function(input, output, session) {
 
   # Filtered data
   filtered_data <- reactive({
-    req(data_bfi())
     df <- data_bfi()
-    if (!is.null(input$groupColumn))      df <- df %>% select(-all_of(input$groupColumn))
-    if (!is.null(input$removeItemsManual))df <- df %>% select(-all_of(input$removeItemsManual))
+    if (!is.null(input$groupColumn))
+      df <- df %>% select(-all_of(input$groupColumn))
+    if (!is.null(input$removeItemsManual))
+      df <- df %>% select(-all_of(input$removeItemsManual))
     df
   })
 
-  # EGA Validation (theme_void for axes-free)
+  # EGA Validation
   ega_result <- eventReactive(input$runEGA, {
     req(filtered_data())
     ncores <- min(detectCores(FALSE),2)
@@ -232,6 +272,7 @@ server <- function(input, output, session) {
     }
     tryCatch(do.call(EGA,args), error=function(e){ showNotification(e$message,type="error"); NULL })
   })
+
   output$plotEGA <- renderPlot({
     res <- ega_result(); req(res)
     print(
@@ -242,18 +283,26 @@ server <- function(input, output, session) {
                  hjust=1, vjust=-1)
     )
   })
+
   output$downloadEGAPlot <- downloadHandler(
     filename="EGA_plot.jpg",
     content=function(file){
-      ggsave(file,
-             plot=ega_result()$plot.EGA + theme_void(),
-             width=8, height=6, dpi=300, bg="white")
+      ggsave(
+        file,
+        plot   = ega_result()$plot.EGA + theme_void(),
+        width  = input$widthEGA,
+        height = input$heightEGA,
+        dpi    = input$dpiEGA,
+        bg     = "white"
+      )
     }
   )
+
   output$networkLoads <- renderTable({
     res <- ega_result(); req(res)
     net.loads(res)$std %>% as.data.frame() %>% rownames_to_column("Item")
   })
+
   convert_EGA_to_df <- function(res) {
     m    <- res$network
     meth <- attr(m,"methods")
@@ -273,10 +322,12 @@ server <- function(input, output, session) {
     )
     tibble(Index=names(metrics),Value=unlist(metrics))
   }
+
   output$informativeTable <- renderTable({
     res <- ega_result(); req(res)
     convert_EGA_to_df(res)
   })
+
   output$downloadNetworkLoads <- downloadHandler(
     filename="network_loads.xlsx",
     content=function(file){
@@ -286,6 +337,7 @@ server <- function(input, output, session) {
       )
     }
   )
+
   output$downloadInformativeTable <- downloadHandler(
     filename="informative_table.xlsx",
     content=function(file){
@@ -293,7 +345,7 @@ server <- function(input, output, session) {
     }
   )
 
-  # Reliability with progress
+  # Reliability
   bootEGA_res <- eventReactive(input$runBootEGA, {
     req(filtered_data())
     withProgress(message="Running reliability analysis...", value=0, {
@@ -314,7 +366,7 @@ server <- function(input, output, session) {
         args$resolution_parameter <- input$resolution_parameter
       }
       incProgress(0.2)
-      res <- tryCatch(do.call(bootEGA,args), error=function(e)NULL)
+      res <- tryCatch(do.call(bootEGA,args),error=function(e)NULL)
       incProgress(0.6)
       validate(need(!is.null(res),"Error in reliability"))
       sc <- EGAnet::dimensionStability(res)
@@ -322,10 +374,26 @@ server <- function(input, output, session) {
       list(boot=res, sc=sc)
     })
   })
+
   output$plotBootEGA <- renderPlot({
     br <- bootEGA_res(); req(br)
     print(br$boot$stability$item.stability$plot + theme_minimal() + ggtitle("Item Stability"))
   })
+
+  output$downloadBootEGAPlot <- downloadHandler(
+    filename="item_stability_plot.jpg",
+    content=function(file){
+      ggsave(
+        file,
+        plot   = bootEGA_res()$boot$stability$item.stability$plot + theme_minimal(),
+        width  = input$widthBoot,
+        height = input$heightBoot,
+        dpi    = input$dpiBoot,
+        bg     = "white"
+      )
+    }
+  )
+
   output$structuralConsistency <- renderTable({
     sc <- bootEGA_res()$sc; req(sc)
     data.frame(
@@ -333,14 +401,7 @@ server <- function(input, output, session) {
       Consistency = sc$dimension.stability$structural.consistency
     )
   })
-  output$downloadBootEGAPlot <- downloadHandler(
-    filename="item_stability_plot.jpg",
-    content=function(file){
-      ggsave(file,
-             plot=bootEGA_res()$boot$stability$item.stability$plot + theme_minimal(),
-             width=8, height=6, dpi=300, bg="white")
-    }
-  )
+
   output$downloadStructuralConsistency <- downloadHandler(
     filename="structural_consistency.xlsx",
     content=function(file){
@@ -348,11 +409,11 @@ server <- function(input, output, session) {
         Dimension   = names(bootEGA_res()$sc$dimension.stability$structural.consistency),
         Consistency = bootEGA_res()$sc$dimension.stability$structural.consistency
       )
-      write.xlsx(df_sc,file)
+      write.xlsx(df_sc, file)
     }
   )
 
-  # Measurement Invariance with progress
+  # Measurement Invariance
   invariance_res <- eventReactive(input$runInvariance, {
     req(data_bfi(), input$groupColumn)
     withProgress(message="Running invariance analysis...", value=0, {
@@ -383,22 +444,31 @@ server <- function(input, output, session) {
       res
     })
   })
+
   output$invariancePlot <- renderPlot({
     inv <- invariance_res(); req(inv)
     plot(inv, p_type=input$p_type, p_value=input$p_value)
   })
+
+  output$downloadInvariancePlot <- downloadHandler(
+    filename="invariance_plot.jpg",
+    content=function(file){
+      ggsave(
+        file,
+        plot   = plot(invariance_res(), p_type=input$p_type, p_value=input$p_value),
+        width  = input$widthInv,
+        height = input$heightInv,
+        dpi    = input$dpiInv,
+        bg     = "white"
+      )
+    }
+  )
+
   output$invarianceTable <- renderTable({
     inv <- invariance_res(); req(inv)
     as.data.frame(inv$results) %>% rownames_to_column("Item")
   })
-  output$downloadInvariancePlot <- downloadHandler(
-    filename="invariance_plot.jpg",
-    content=function(file){
-      ggsave(file,
-             plot=plot(invariance_res(), p_type=input$p_type, p_value=input$p_value),
-             width=8, height=6, dpi=300, bg="white")
-    }
-  )
+
   output$downloadInvarianceTable <- downloadHandler(
     filename="invariance_results.xlsx",
     content=function(file){
@@ -406,12 +476,13 @@ server <- function(input, output, session) {
     }
   )
 
-  # Hierarchical EGA — now axes removed
+  # Hierarchical EGA
   hier_res <- reactive({
     req(filtered_data())
     tryCatch(EGAnet::hierEGA(filtered_data(), scores="network", plot.EGA=TRUE),
-             error = function(e) NULL)
+             error=function(e)NULL)
   })
+
   output$plotHierEGA <- renderPlot({
     hr <- hier_res()
     if (is.null(hr)) {
@@ -424,18 +495,22 @@ server <- function(input, output, session) {
         ggtitle("Hierarchical EGA Plot")
     )
   })
+
   output$downloadHierEGAPlot <- downloadHandler(
     filename="hierEGA_plot.jpg",
     content=function(file){
       ggsave(
         file,
-        plot = hier_res()$plot.hierEGA + theme_void(),
-        width = 8, height = 6, dpi = 300, bg = "white"
+        plot   = hier_res()$plot.hierEGA + theme_void(),
+        width  = input$widthHier,
+        height = input$heightHier,
+        dpi    = input$dpiHier,
+        bg     = "white"
       )
     }
   )
 
-  # Wording Effects (theme_void)
+  # Wording Effects
   observeEvent(input$runWordingEffects, {
     req(filtered_data())
     result <- tryCatch(
@@ -462,8 +537,11 @@ server <- function(input, output, session) {
         content=function(file){
           ggsave(
             file,
-            plot = result$Plot.EGA + theme_void(),
-            width=8, height=6, dpi=300, bg="white"
+            plot   = result$Plot.EGA + theme_void(),
+            width  = input$widthWord,
+            height = input$heightWord,
+            dpi    = input$dpiWord,
+            bg     = "white"
           )
         }
       )
