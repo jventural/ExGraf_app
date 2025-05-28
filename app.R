@@ -1,3 +1,5 @@
+
+
 # app.R
 
 library(shiny)
@@ -14,6 +16,10 @@ library(tibble)
 library(openxlsx)
 library(parallel)
 library(dashboardthemes)
+library(ggstats)
+library(psych)
+
+
 
 ui <- dashboardPage(
   skin = "blue",
@@ -35,16 +41,75 @@ ui <- dashboardPage(
       options = pickerOptions(actionsBox = TRUE, liveSearch = TRUE)
     ),
     sidebarMenu(id = "tabs",
+                menuItem("Introducción", tabName = "intro", icon = icon("info-circle")),
+                menuItem("Item Analysis", tabName = "item_analysis", icon = icon("chart-bar")),
                 menuItem("EGA Validation",         tabName = "ega",       icon = icon("project-diagram")),
                 menuItem("Reliability",            tabName = "bootega",   icon = icon("chart-line")),
                 menuItem("Measurement Invariance", tabName = "invariance",icon = icon("balance-scale")),
                 menuItem("Hierarchical Model",     tabName = "hier",      icon = icon("layer-group")),
                 menuItem("Wording Effects",        tabName = "wording",   icon = icon("font")),
-                menuItem("Redundancy Analysis",    tabName = "uva",       icon = icon("redo"))
+                menuItem("Redundancy Analysis",    tabName = "uva",       icon = icon("redo")),
+                menuItem("References", tabName = "references", icon = icon("book-open"))
     )
   ),
   dashboardBody(
     tabItems(
+      # 0) Introducción
+      tabItem(tabName = "intro",
+              fluidRow(
+                box(
+                  title = "¡Welcome to ExGraf Shiny!", status = "primary", solidHeader = TRUE, width = 12,
+                  HTML('
+
+          <p><strong>ExGraf</strong> is a Shiny application designed to perform <strong>Exploratory Graph Analysis (EGA)</strong> to       identify the dimensional structure of psychometric data using network-based methods.</p>
+
+      <h4>What can you do with ExGraf Shiny?</h4>
+    <ul>
+      <li><strong>Data Import:</strong> Upload files in <code>.csv</code> or <code>.xlsx</code> format.</li>
+      <li><strong>Item Analysis:</strong> Explore descriptive statistics and visualize response distributions using Likert plots.</li>
+      <li><strong>EGA Validation:</strong> Analyze and visualize dimensions using networks.</li>
+      <li><strong>Reliability:</strong> Assess internal consistency of the identified dimensions.</li>
+      <li><strong>Measurement Invariance:</strong> Compare structures across groups.</li>
+      <li><strong>Hierarchical Model:</strong> Explore relationships between first- and second-order dimensions.</li>
+      <li><strong>Wording Effects:</strong> Detect reverse-worded items that may distort dimensionality.</li>
+      <li><strong>Redundancy Analysis:</strong> Identify redundant items within your scale.</li>
+    </ul>
+
+    <p style="color:#a94442; font-weight:bold;">
+    ⚠️ To properly run the Measurement Invariance, your dataset must include at least one <strong>categorical variable</strong> (e.g., <em>sex</em>).
+    </p>
+
+    <p>Don&apos;t have a dataset to test? Download a sample dataset here:</p>
+      '),
+                  downloadButton("descargar_ejemplo",
+                                 label = HTML("<i class='fa fa-download'></i> Download sample dataset"),
+                                 class = "btn btn-primary")
+                )
+              )
+      ),
+
+      # 00) Item Analysis
+      tabItem(tabName = "item_analysis",
+              fluidRow(
+                box(title = "Descriptive Statistics", width = 12, status = "info", solidHeader = TRUE,
+                    withSpinner(DT::dataTableOutput("tabla_descriptivos"), type = 4)
+                )
+              ),
+              fluidRow(
+                box(title = "Likert Response Plot", width = 12, status = "primary", solidHeader = TRUE,
+                    withSpinner(plotOutput("grafico_likert"), type = 4),
+                    br(),
+                    h5("Download Settings"),
+                    numericInput("widthLikert",  "Width (inches):",  8, min = 1),
+                    numericInput("heightLikert", "Height (inches):", 6, min = 1),
+                    numericInput("dpiLikert",    "Resolution (dpi):", 300, min = 50)
+                )
+              ),
+              fluidRow(
+                downloadBttn("download_descriptivos", "Download Descriptive Table", style = "jelly", color = "primary"),
+                downloadBttn("download_likertplot",   "Download Likert Plot",       style = "jelly", color = "success")
+              )
+      ),
 
       # 1) EGA Validation
       tabItem(tabName = "ega",
@@ -210,6 +275,33 @@ ui <- dashboardPage(
                        )
                 )
               )
+      ),
+
+      # 7) Referencias
+      tabItem(tabName = "references",
+              fluidRow(
+                box(
+                  title = "How to Cite ExGraf", width = 12, status = "primary", solidHeader = TRUE,
+                  HTML('
+              <p>If you use <strong>ExGraf</strong> in your research or teaching, please cite it as follows:</p>
+              <p>Ventura-León, J., Lino-Cruz, C., Tocto-Muñoz, S., & Sánchez-Villena, A. R. (in development). ExGraf: A Shiny interface for accessible Exploratory Graph Analysis in psychological and behavioral research. GitHub Repository. <a href="https://github.com/jventural/ExGraf_app" target="_blank">https://github.com/jventural/ExGraf_app</a></p>
+              <hr>
+              <h4>Recommended References</h4>
+              <ul>
+
+                <li>Christensen, A. P., Garrido, L. E., & Guerra-Peña, K. (2024). Comparing community detection algorithms in psychometric networks: A Monte Carlo simulation. <em>Behavior Research Methods, 56</em>, 1485–1505. <a href="https://doi.org/10.3758/s13428-023-02106-4" target="_blank">https://doi.org/10.3758/s13428-023-02106-4</a></li>
+
+                <li>Christensen, A. P., & Golino, H. (2021). Estimating the stability of psychological dimensions via Bootstrap Exploratory Graph Analysis: A Monte Carlo simulation and tutorial. <em>Psych, 3</em>(3), 479–500. <a href="https://doi.org/10.3390/psych3030032" target="_blank">https://doi.org/10.3390/psych3030032</a></li>
+
+                <li>Golino, H. F., & Epskamp, S. (2017). Exploratory graph analysis: A new approach for estimating the number of dimensions in psychological research. <em>PLoS ONE, 12</em>(6), e0174035. <a href="https://doi.org/10.1371/journal.pone.0174035" target="_blank">https://doi.org/10.1371/journal.pone.0174035</a></li>
+
+                <li>Jamison, L., Christensen, A. P., & Golino, H. F. (2024). Metric invariance in Exploratory Graph Analysis via permutation testing. <em>Methodology, 20</em>(2), 144–186. <a href="https://doi.org/10.5964/meth.12877" target="_blank">https://doi.org/10.5964/meth.12877</a></li>
+
+                <li>Jiménez, M., Abad, F. J., García-Garzón, E., Golino, H., Christensen, A. P., & Garrido, L. E. (2023). Dimensionality assessment in bifactor structures with multiple general factors: A network psychometrics approach. <em>Psychological Methods</em>. Advance online publication. <a href="https://doi.org/10.1037/met0000590" target="_blank">https://doi.org/10.1037/met0000590</a></li>
+              </ul>
+            ')
+                )
+              )
       )
 
     )
@@ -217,6 +309,24 @@ ui <- dashboardPage(
 )
 
 server <- function(input, output, session) {
+
+  # Data descargada
+  output$descargar_ejemplo <- downloadHandler(
+    filename = function() {
+      "Data_Rosenberg.xlsx"
+    },
+    content = function(file) {
+      datos <- data.frame(
+        sexo = rep(c("M", "F"), each = 5),
+        item1 = rnorm(10),
+        item2 = rnorm(10),
+        item3 = rnorm(10),
+        item4 = rnorm(10),
+        item5 = rnorm(10)
+      )
+      write.csv(datos, file, row.names = FALSE)
+    }
+  )
 
   # Load data, auto-detect CSV delimiter
   data_bfi <- reactive({
@@ -252,6 +362,46 @@ server <- function(input, output, session) {
       df <- df %>% select(-all_of(input$removeItemsManual))
     df
   })
+
+  # Item-Analysis
+  output$tabla_descriptivos <- DT::renderDataTable({
+    req(filtered_data())
+    descr <- psych::describe(filtered_data())
+    descr_rounded <- round(descr, 2)
+    DT::datatable(descr_rounded, options = list(pageLength = 10))
+  })
+
+  output$download_descriptivos <- downloadHandler(
+    filename = "descriptive_stats.xlsx",
+    content = function(file) {
+      descr <- psych::describe(filtered_data())
+      descr <- round(descr, 2)
+      openxlsx::write.xlsx(descr, file)
+    }
+  )
+
+  output$grafico_likert <- renderPlot({
+    req(filtered_data())
+    ggstats::gglikert(filtered_data()) +
+      labs(title = "Likert Response Distribution",
+           x = "Percentage of responses",
+           y = "Items") +
+      theme_minimal(base_size = 12) +
+      theme(legend.position = "bottom")
+  })
+
+  output$download_likertplot <- downloadHandler(
+    filename = "likert_plot.jpg",
+    content = function(file) {
+      g <- ggstats::gglikert(filtered_data()) +
+        theme_minimal(base_size = 12) +
+        labs(title = "",
+             x = "Percentage", y = "Items") +
+        theme(legend.position = "bottom")
+
+      ggsave(file, plot = g, width = input$widthLikert, height = input$heightLikert, dpi = input$dpiLikert)
+    }
+  )
 
   # EGA Validation
   ega_result <- eventReactive(input$runEGA, {
@@ -562,3 +712,6 @@ server <- function(input, output, session) {
 }
 
 shinyApp(ui, server)
+
+
+
