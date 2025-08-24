@@ -5,7 +5,7 @@ options(repos = c(CRAN = "https://cran.r-project.org"))
 
 pkgs <- c(
   "shiny","shinydashboard","shinydashboardPlus","shinyjs","shinycssloaders",
-  "shinyWidgets","readxl","EGAnet","ggplot2","dplyr","tibble","openxlsx",
+  "shinyWidgets","readxl","EGAnet","ggplot2","dplyr","tibble","openxlsx", "labelled",
   "parallel","dashboardthemes","ggstats","psych","jsonlite","httr","officer",
   "digest","commonmark"
 )
