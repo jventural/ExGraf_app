@@ -1,5 +1,5 @@
 # app.R
-
+install.packages("httr", dependencies = T)
 library(shiny)
 library(shinydashboard)
 library(shinydashboardPlus)
