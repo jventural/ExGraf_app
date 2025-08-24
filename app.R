@@ -1,7 +1,24 @@
 # app.R
-install.packages("httr", dependencies = T)
-# Opcional, seguro en cualquier entorno (no instala nada)
-options(repos = c(CRAN = "https://cran.rstudio.com/"))a
+
+# ---- Repos seguro + auto-instalación de paquetes ----
+options(repos = c(CRAN = "https://cran.r-project.org"))
+
+pkgs <- c(
+  "shiny","shinydashboard","shinydashboardPlus","shinyjs","shinycssloaders",
+  "shinyWidgets","readxl","EGAnet","ggplot2","dplyr","tibble","openxlsx",
+  "parallel","dashboardthemes","ggstats","psych","jsonlite","httr","officer",
+  "digest","commonmark"
+)
+to_install <- setdiff(pkgs, rownames(installed.packages()))
+if (length(to_install)) install.packages(to_install, dependencies = TRUE)
+
+# ---- Helpers utilizados en todo el script (definir ANTES) ----
+`%||%` <- function(a, b) if (!is.null(a) && length(a)) a else b
+compact <- function(x) {
+  nulls <- vapply(x, is.null, logical(1))
+  x[!nulls]
+}
+
 library(shiny)
 library(shinydashboard)
 library(shinydashboardPlus)
@@ -203,7 +220,6 @@ generate_r_code <- function(analysis_type, params, data_info) {
                           "}\n"
            )
          }
-
   )
 
   return(code)
@@ -796,8 +812,7 @@ server <- function(input, output, session) {
     out
   }
 
-  # === NUEVO: datos antes de remoción manual (para UVA “real” previo) ===
-  # ----- UVA ------------------------------------------------------------------
+  # === UVA: datos antes y después de remoción manual (versión única) =========
   # (a) UVA con datos previos a la remoción manual (para sugerencias)
   data_before_manual <- reactive({
     req(data_bfi())
@@ -830,6 +845,19 @@ server <- function(input, output, session) {
         length(sug), plural(length(sug)), fmt_list(sug)
       )
     }
+  })
+
+  # (b) UVA con datos actuales (post-remoción) para mostrar summary(uva)
+  uva_now_result <- reactive({
+    req(filtered_data())
+    df <- filtered_data() %>% dplyr::mutate(dplyr::across(dplyr::everything(), as.numeric))
+    tryCatch(EGAnet::UVA(df), error = function(e) NULL)
+  })
+
+  # Bloque que imprime EXACTAMENTE la salida tipo summary(UVA(...))
+  output$uvaPairsVerbose <- renderPrint({
+    ur <- uva_now_result(); req(ur)
+    summary(ur)
   })
 
   # Resumen de progreso vs sugerencias
@@ -877,55 +905,28 @@ server <- function(input, output, session) {
     paste(parts, collapse = "\n")
   })
 
-  # (b) UVA con datos actuales (post-remoción) para mostrar summary(uva)
-  uva_now_result <- reactive({
-    req(filtered_data())
-    df <- filtered_data() %>% dplyr::mutate(dplyr::across(dplyr::everything(), as.numeric))
-    tryCatch(EGAnet::UVA(df), error = function(e) NULL)
-  })
+  # ---- Notificaciones cuando cambian los ítems retirados (mantener) ----------
+  prev_manual <- reactiveVal(character(0))
+  observeEvent(input$removeItemsManual, ignoreInit = TRUE, {
+    old <- prev_manual()
+    new <- sort(as.character(input$removeItemsManual %||% character(0)))
+    added   <- setdiff(new, old)   # ítems recién retirados
+    restored <- setdiff(old, new)  # ítems reincorporados
 
-  # Bloque que imprime EXACTAMENTE la salida tipo summary(UVA(...))
-  output$uvaPairsVerbose <- renderPrint({
-    ur <- uva_now_result(); req(ur)
-    # Esto imprime los encabezados "Variable pairs with wTO > 0.30", etc., y las parejas
-    summary(ur)
-  })
-
-
-  build_report_facts <- function() {
-    ega_facts <- compact_loadings_for_prompt(analysis_results$ega, top_per_dim = 5)
-    hier_available <- !is.null(analysis_results$hierega) &&
-      !is.null(analysis_results$hierega$lower_order) &&
-      !is.null(analysis_results$hierega$higher_order)
-    hier_facts <- list(
-      available    = isTRUE(hier_available),
-      lower_order  = if (hier_available) analysis_results$hierega$lower_order$n.dim else NA,
-      higher_order = if (hier_available) analysis_results$hierega$higher_order$n.dim else NA
-    )
-    wr <- try(wording_result(), silent = TRUE)
-    wording_available <- (!inherits(wr, "try-error") && !is.null(wr) && !inherits(wr, "error") && !is.null(wr$Plot.EGA))
-    wording_facts <- list(available = isTRUE(wording_available))
-
-    # NUEVO: UVA sugerido + remoción manual
-    uva_removed_suggested <- character(0)
-    if (!is.null(uva_pre_result()) && !is.null(uva_pre_result()$keep_remove$remove)) {
-      uva_removed_suggested <- as.character(uva_pre_result()$keep_remove$remove)
-    }
-    manual_removed <- as.character(data_info$removed_items %||% character(0))
-
-    likert_present <- !is.null(analysis_results$likert_data) && length(analysis_results$likert_data) > 0
-
-    list(
-      likert_present = likert_present,
-      ega            = ega_facts,
-      hierarchical   = hier_facts,
-      wording        = wording_facts,
-      uva            = list(
-        suggested_removed = uva_removed_suggested,
-        manual_removed    = manual_removed
+    if (length(added)) {
+      showNotification(
+        paste0("Retiro confirmado (", length(added), "): ", fmt_list(added)),
+        type = "message", duration = 6
       )
-    )
-  }
+    }
+    if (length(restored)) {
+      showNotification(
+        paste0("Reincorporaste (", length(restored), "): ", fmt_list(restored)),
+        type = "warning", duration = 6
+      )
+    }
+    prev_manual(new)
+  })
 
   # --- Normalización y post-procesado de secciones ---------------------------
   norm_md <- function(x) {
@@ -943,24 +944,20 @@ server <- function(input, output, session) {
   # NUEVO: forzar párrafo en “Parámetros técnicos y criterios”
   force_params_paragraph <- function(txt) {
     if (!nzchar(txt)) return(txt)
-    # localiza el bloque bajo el encabezado
     rx_head <- "(?im)^\\s*#{0,3}\\s*Par[aá]metros\\s+t[ée]cnicos\\s+y\\s+criterios\\s*$"
     m <- regexpr(rx_head, txt, perl = TRUE)
     if (m[1] == -1) return(txt)
     start <- m[1] + attr(m, "match.length")
     rest  <- substr(txt, start, nchar(txt))
-    # hasta el próximo encabezado o fin
     next_head <- regexpr("(?m)^\\s*#{1,6}\\s+|^\\s*[A-Z].*:\\s*$", rest, perl = TRUE)
     end_pos <- if (next_head[1] == -1) nchar(rest) else next_head[1] - 1
     block <- substr(rest, 1, end_pos)
-    # extrae líneas con viñetas
     bullets <- gregexpr("(?m)^[\\t ]*([\\-\\*•])\\s+(.+)$", block, perl = TRUE)
-    if (bullets[[1]][1] == -1) return(txt)  # no había viñetas
+    if (bullets[[1]][1] == -1) return(txt)
     lines <- regmatches(block, bullets)[[1]]
     lines <- gsub("(?m)^[\\t ]*([\\-\\*•])\\s+", "", lines, perl = TRUE)
     lines <- trimws(lines)
     if (!length(lines)) return(txt)
-    # arma párrafo con conectores simples
     connectors <- c("Asimismo, ", "Además, ", "Por último, ")
     parts <- lines
     if (length(parts) >= 2) parts[2] <- paste0(connectors[1], parts[2])
@@ -968,7 +965,6 @@ server <- function(input, output, session) {
     if (length(parts) >= 4) parts[length(parts)] <- paste0(connectors[3], parts[length(parts)])
     paragraph <- paste(parts, collapse = " ")
     paragraph <- paste0("\n\n", paragraph, "\n\n")
-    # reemplaza bloque original por párrafo
     new_rest <- paste0(paragraph, substr(rest, end_pos + 1, nchar(rest)))
     paste0(substr(txt, 1, start), new_rest)
   }
@@ -977,30 +973,23 @@ server <- function(input, output, session) {
   inject_markers <- function(txt) {
     if (!nzchar(txt)) return(txt)
     s <- gsub("\r", "", txt)
-    # Elimina sección "Red latente" si existiera (mantenemos este saneamiento)
     s <- gsub(
       "(?is)\\n?\\s*(?:#{1,6}\\s*|\\d+\\.\\s*)?(?:An[aá]lisis\\s+de\\s+)?Red\\s+latente\\s*\\n.*?(?=\\n\\s*(?:#{1,6}|\\d+\\.|Invarianza|An[aá]lisis\\s+adicionales|Conclusiones|Referencias)\\b|\\Z)",
       "\n", s, perl = TRUE
     )
-    # Ya NO inyectamos nada en “Cargas de red”; los marcadores vienen del prompt
-    # Asegura encabezado “Resultados”
     if (!grepl("(?im)^\\s*#*\\s*Resultados\\b", s, perl = TRUE)) {
       s <- paste0("# Resultados\n\n", s)
     }
     s
   }
 
-
   md_to_html <- function(x) {
     if (!nzchar(x)) return("")
     if (requireNamespace("commonmark", quietly = TRUE)) {
-      # Intento con extensión de tablas (GFM). Si no existe en tu versión, hace fallback.
       conv <- try(commonmark::markdown_html(x, extensions = "table", smart = FALSE), silent = TRUE)
       if (!inherits(conv, "try-error")) return(conv)
-      # Fallback sin extensiones (algunas versiones antiguas de commonmark)
       return(commonmark::markdown_html(x, smart = FALSE))
     } else {
-      # Fallback muy básico si no está commonmark
       x <- gsub("&", "&amp;", x, fixed = TRUE)
       x <- gsub("<", "&lt;",  x, fixed = TRUE)
       x <- gsub(">", "&gt;",  x, fixed = TRUE)
@@ -1008,12 +997,11 @@ server <- function(input, output, session) {
     }
   }
 
-
   # Secciones finales (UI y Word usan lo mismo)
   report_output <- reactiveValues(data_analysis = NULL, results = NULL, error = NULL)
   final_sections <- reactive({
     analysis_md <- norm_md(report_output$data_analysis %||% "")
-    analysis_md <- force_params_paragraph(analysis_md)   # ← NUEVO
+    analysis_md <- force_params_paragraph(analysis_md)
     list(
       analysis = analysis_md,
       results  = inject_markers(norm_md(report_output$results %||% ""))
@@ -1029,7 +1017,7 @@ server <- function(input, output, session) {
   # ----- Ejemplo descarga -----------------------------------------------------
   output$descargar_ejemplo <- downloadHandler(
     filename = function() "Data_Rosenberg.xlsx",
-    content = function(file) {
+    content  = function(file) {
       datos <- data.frame(
         sexo = rep(c("M", "F"), each = 5),
         item1 = rnorm(10),
@@ -1038,7 +1026,7 @@ server <- function(input, output, session) {
         item4 = rnorm(10),
         item5 = rnorm(10)
       )
-      write.csv(datos, file, row.names = FALSE)
+      openxlsx::write.xlsx(datos, file)
     }
   )
 
@@ -1132,24 +1120,31 @@ server <- function(input, output, session) {
   ega_result <- eventReactive(input$runEGA, {
     req(filtered_data())
     ncores <- detect_cores_for_cloud()
+
+    # seed es opcional en la UI de EGA; si no existe, no lo pasamos
+    seed_val <- NULL
+    if (!is.null(input$seed)) {
+      tmp <- suppressWarnings(as.integer(input$seed))
+      if (length(tmp) == 1 && !is.na(tmp)) seed_val <- tmp
+    }
+
     args <- list(
       data      = filtered_data(),
       corr      = input$corr,
       model     = input$model,
       algorithm = input$algorithm,
       plot.EGA  = TRUE,
-      seed      = input$seed,
+      seed      = seed_val,
       ncores    = ncores
     )
-    if (input$algorithm=="leiden") {
-      args$resolution_parameter <- input$resolution_parameter
-      args$objective_function   <- input$objective_function
+    if (identical(input$algorithm, "leiden")) {
+      args$resolution_parameter <- input$resolution_parameter %||% NULL
+      args$objective_function   <- input$objective_function   %||% NULL
     }
-    tryCatch(EGAnet::EGA(args$data, corr=args$corr, model=args$model, algorithm=args$algorithm,
-                         plot.EGA=TRUE, seed=args$seed, ncores=args$ncores,
-                         resolution_parameter = args$resolution_parameter %||% NULL,
-                         objective_function   = args$objective_function   %||% NULL),
-             error=function(e){ showNotification(e$message,type="error"); NULL })
+    tryCatch(
+      do.call(EGAnet::EGA, compact(args)),
+      error=function(e){ showNotification(e$message,type="error"); NULL }
+    )
   })
 
   output$plotEGA <- renderPlot({
@@ -1166,9 +1161,10 @@ server <- function(input, output, session) {
   output$downloadEGAPlot <- downloadHandler(
     filename="EGA_plot.jpg",
     content=function(file){
+      res <- ega_result(); req(res)
       ggsave(
         file,
-        plot   = ega_result()$plot.EGA + theme_void(),
+        plot   = res$plot.EGA + theme_void(),
         width  = input$widthEGA,
         height = input$heightEGA,
         dpi    = input$dpiEGA,
@@ -1186,8 +1182,8 @@ server <- function(input, output, session) {
     m    <- res$network
     meth <- attr(m,"methods")
     metrics <- list(
-      Model                   = toupper(meth$model),
-      Correlations            = meth$corr,
+      Model                   = toupper(meth$model %||% NA),
+      Correlations            = meth$corr %||% NA,
       Lambda                  = if(!is.null(meth$lambda)) formatC(meth$lambda,format="f",digits=3) else NA,
       `Number of nodes`       = nrow(m),
       `Number of edges`       = sum(m!=0)/2,
@@ -1245,30 +1241,36 @@ server <- function(input, output, session) {
     withProgress(message="Running reliability analysis...", value=0, {
       incProgress(0.1)
       ncores <- detect_cores_for_cloud()
+
+      # seed está definido en UI de bootEGA
+      seed_val <- NULL
+      if (!is.null(input$seed)) {
+        tmp <- suppressWarnings(as.integer(input$seed))
+        if (length(tmp) == 1 && !is.na(tmp)) seed_val <- tmp
+      }
+
       args <- list(
         data      = filtered_data(),
         iter      = as.numeric(input$iter),
         model     = input$model,
         corr      = input$corr,
         algorithm = input$algorithm,
-        seed      = as.numeric(input$seed),
+        seed      = seed_val,
         type      = input$type,
         ncores    = ncores
       )
-      if (input$algorithm=="leiden") {
-        args$objective_function   <- input$objective_function
-        args$resolution_parameter <- input$resolution_parameter
+      if (identical(input$algorithm,"leiden")) {
+        args$objective_function   <- input$objective_function   %||% NULL
+        args$resolution_parameter <- input$resolution_parameter %||% NULL
       }
       incProgress(0.2)
-      res <- tryCatch(EGAnet::bootEGA(
-        data=args$data, iter=args$iter, model=args$model, corr=args$corr,
-        algorithm=args$algorithm, seed=args$seed, type=args$type, ncores=args$ncores,
-        resolution_parameter = args$resolution_parameter %||% NULL,
-        objective_function   = args$objective_function   %||% NULL
-      ), error=function(e){
-        showNotification(paste("Error in bootEGA:", e$message), type="error", duration=10)
-        NULL
-      })
+      res <- tryCatch(
+        do.call(EGAnet::bootEGA, compact(args)),
+        error=function(e){
+          showNotification(paste("Error in bootEGA:", e$message), type="error", duration=10)
+          NULL
+        }
+      )
       incProgress(0.6)
 
       if(is.null(res)) return(NULL)
@@ -1374,7 +1376,11 @@ server <- function(input, output, session) {
 
       incProgress(0.2)
 
-      set.seed(input$seedInv)
+      seed_val <- NULL
+      if (!is.null(input$seedInv)) {
+        tmp <- suppressWarnings(as.integer(input$seedInv))
+        if (length(tmp) == 1 && !is.na(tmp)) seed_val <- tmp
+      }
       RNGkind(sample.kind = "Rounding")
 
       ncores_inv <- detect_cores_for_cloud()
@@ -1386,7 +1392,7 @@ server <- function(input, output, session) {
         model = input$model,
         algorithm = input$algorithm,
         iter = as.numeric(input$iterInv),
-        seed = as.numeric(input$seedInv),
+        seed = seed_val,
         uni.method = "LE",
         configural.type = "resampling",
         configural.threshold = as.numeric(input$configural_threshold),
@@ -1394,13 +1400,13 @@ server <- function(input, output, session) {
         verbose = FALSE,
         loading.method = "revised"
       )
-      if (input$algorithm == "leiden") {
-        args_inv$resolution_parameter <- input$resolution_parameter
-        args_inv$objective_function   <- input$objective_function
+      if (identical(input$algorithm, "leiden")) {
+        args_inv$resolution_parameter <- input$resolution_parameter %||% NULL
+        args_inv$objective_function   <- input$objective_function   %||% NULL
       }
 
       res <- tryCatch(
-        do.call(EGAnet::invariance, args_inv),
+        do.call(EGAnet::invariance, compact(args_inv)),
         error = function(e) {
           showNotification(paste("Error in invariance analysis:", e$message), type = "error", duration = 10)
           NULL
@@ -1429,9 +1435,10 @@ server <- function(input, output, session) {
   output$downloadInvariancePlot <- downloadHandler(
     filename = "invariance_plot.jpg",
     content = function(file) {
+      inv <- invariance_res(); req(inv)
       ggsave(
         file,
-        plot = plot(invariance_res(), p_type = input$p_type, p_value = input$p_value),
+        plot = plot(inv, p_type = input$p_type, p_value = input$p_value),
         width = input$widthInv, height = input$heightInv, dpi = input$dpiInv, bg = "white"
       )
     }
@@ -1608,122 +1615,6 @@ server <- function(input, output, session) {
         seed = input$seed
       )
       code <- generate_r_code("wording", params, data_info)
-      writeLines(code, file)
-    }
-  )
-
-  # ----- UVA ------------------------------------------------------------------
-  # --- SOLO si no existen en tu server ---
-  data_before_manual <- reactive({
-    req(data_bfi())
-    df <- data_bfi()
-    if (!is.null(input$groupColumn))
-      df <- df %>% dplyr::select(-dplyr::all_of(input$groupColumn))
-    df %>% dplyr::mutate(dplyr::across(dplyr::everything(), as.numeric))
-  })
-  uva_pre_result <- reactive({
-    req(data_before_manual())
-    tryCatch(EGAnet::UVA(data_before_manual()), error = function(e) NULL)
-  })
-  # --- fin “solo si no existen” ---
-
-  fmt_list <- function(x) if (length(x)) paste(x, collapse = ", ") else "—"
-  plural   <- function(n) ifelse(n == 1, "ítem", "ítems")
-
-  # 2.1 Mensaje de SUGERENCIA (antes de retirar)
-  output$uvaSuggest <- renderText({
-    sug <- character(0)
-    if (!is.null(uva_pre_result()) && !is.null(uva_pre_result()$keep_remove$remove)) {
-      sug <- as.character(uva_pre_result()$keep_remove$remove)
-    }
-    if (length(sug) == 0) {
-      "UVA no sugiere retirar ítems."
-    } else {
-      sprintf(
-        "Sugerencia UVA: revisar posibles redundancias en %d %s: %s. Usa “Select items to remove” para retirarlos del análisis.",
-        length(sug), plural(length(sug)), fmt_list(sug)
-      )
-    }
-  })
-
-  # 2.2 Confirmación por notificación cuando usas Select items to remove
-  prev_manual <- reactiveVal(character(0))
-  observeEvent(input$removeItemsManual, ignoreInit = TRUE, {
-    old <- prev_manual()
-    new <- sort(as.character(input$removeItemsManual %||% character(0)))
-    added   <- setdiff(new, old)   # ítems recién retirados
-    restored <- setdiff(old, new)  # ítems reincorporados
-
-    if (length(added)) {
-      showNotification(
-        paste0("Retiro confirmado (", length(added), "): ", fmt_list(added)),
-        type = "message", duration = 6
-      )
-    }
-    if (length(restored)) {
-      showNotification(
-        paste0("Reincorporaste (", length(restored), "): ", fmt_list(restored)),
-        type = "warning", duration = 6
-      )
-    }
-    prev_manual(new)
-  })
-
-  # 2.3 Resumen claro (progreso, pendientes y extras)
-  output$uvaSummary <- renderText({
-    req(filtered_data())
-
-    # Sugeridos por UVA (antes de la remoción manual)
-    sug <- character(0)
-    if (!is.null(uva_pre_result()) && !is.null(uva_pre_result()$keep_remove$remove)) {
-      sug <- as.character(uva_pre_result()$keep_remove$remove)
-    }
-    # Estado actual (retirados manualmente)
-    man <- as.character(data_info$removed_items %||% character(0))
-
-    if (length(sug) == 0 && length(man) == 0) {
-      return("No se detectaron ítems redundantes ni se registraron remociones manuales.")
-    }
-
-    inter    <- intersect(man, sug)   # sugeridos y retirados
-    pendientes <- setdiff(sug, man)   # sugeridos que aún permanecen
-    extras     <- setdiff(man, sug)   # retirados sin ser sugeridos
-
-    # Caso “todo coincide”
-    if (length(sug) > 0 && length(pendientes) == 0 && length(extras) == 0) {
-      return(sprintf(
-        "Se retiraron %d %s y todos coincidieron con las sugerencias de UVA: %s.",
-        length(inter), plural(length(inter)), fmt_list(inter)
-      ))
-    }
-
-    # Mensaje por secciones (legible, sin redundancia)
-    parts <- c()
-    if (length(sug)) {
-      parts <- c(parts, sprintf("Progreso: retiraste %d/%d sugeridos por UVA%s.",
-                                length(inter), length(sug),
-                                if (length(pendientes)) paste0(" (pendientes: ", fmt_list(pendientes), ")") else ""))
-    }
-    if (length(extras)) {
-      parts <- c(parts, sprintf("Adicionalmente retiraste %d %s no sugeridos por UVA: %s.",
-                                length(extras), plural(length(extras)), fmt_list(extras)))
-    }
-    if (length(man) == 0) {
-      parts <- c(parts, "Aún no has retirado ítems. Selecciona en “Select items to remove”.")
-    } else {
-      parts <- c(parts, sprintf("Estado actual: %d %s retirados: %s.",
-                                length(man), plural(length(man)), fmt_list(man)))
-    }
-
-    paste(parts, collapse = "\n")
-  })
-
-
-
-  output$downloadUVARCode <- downloadHandler(
-    filename = "uva_analysis_code.R",
-    content = function(file) {
-      code <- generate_r_code("uva", list(), data_info)
       writeLines(code, file)
     }
   )
@@ -1947,7 +1838,6 @@ server <- function(input, output, session) {
     citation_json <- jsonlite::toJSON(citation_map, auto_unbox = TRUE)
 
     # Data Analysis (forzar párrafo sin viñetas en parámetros)
-    # Data Analysis (forzar párrafo sin viñetas y con citas APA en las frases correctas)
     analysis_prompt <- paste0(
       lang_instruction,
       "You are an expert in psychometric analysis and academic writing. ",
@@ -1968,7 +1858,6 @@ server <- function(input, output, session) {
       "JSON DATA (context for methods choices):\n", json_for_api
     )
 
-
     report_output$data_analysis <- tryCatch(
       openai_chat_retry(
         model = DEFAULT_GPT_MODEL,
@@ -1986,6 +1875,40 @@ server <- function(input, output, session) {
     if (is.null(report_output$data_analysis)) return()
 
     # Results con HECHOS obligatorios (incluye intro cargas + UVA manual/sugerido)
+    build_report_facts <- function() {
+      ega_facts <- compact_loadings_for_prompt(analysis_results$ega, top_per_dim = 5)
+      hier_available <- !is.null(analysis_results$hierega) &&
+        !is.null(analysis_results$hierega$lower_order) &&
+        !is.null(analysis_results$hierega$higher_order)
+      hier_facts <- list(
+        available    = isTRUE(hier_available),
+        lower_order  = if (hier_available) analysis_results$hierega$lower_order$n.dim else NA,
+        higher_order = if (hier_available) analysis_results$hierega$higher_order$n.dim else NA
+      )
+      wr <- try(wording_result(), silent = TRUE)
+      wording_available <- (!inherits(wr, "try-error") && !is.null(wr) && !inherits(wr, "error") && !is.null(wr$Plot.EGA))
+      wording_facts <- list(available = isTRUE(wording_available))
+
+      uva_removed_suggested <- character(0)
+      if (!is.null(uva_pre_result()) && !is.null(uva_pre_result()$keep_remove$remove)) {
+        uva_removed_suggested <- as.character(uva_pre_result()$keep_remove$remove)
+      }
+      manual_removed <- as.character(data_info$removed_items %||% character(0))
+
+      likert_present <- !is.null(analysis_results$likert_data) && length(analysis_results$likert_data) > 0
+
+      list(
+        likert_present = likert_present,
+        ega            = ega_facts,
+        hierarchical   = hier_facts,
+        wording        = wording_facts,
+        uva            = list(
+          suggested_removed = uva_removed_suggested,
+          manual_removed    = manual_removed
+        )
+      )
+    }
+
     facts_json <- jsonlite::toJSON(build_report_facts(), auto_unbox = TRUE)
     results_prompt <- paste0(
       lang_instruction,
@@ -2015,7 +1938,6 @@ server <- function(input, output, session) {
       facts_json, "\n\n",
       "JSON DATA (full context; may be pruned):\n", json_for_api
     )
-
 
     report_output$results <- tryCatch(
       openai_chat_retry(
@@ -2109,16 +2031,10 @@ server <- function(input, output, session) {
   output$downloadReportWord <- downloadHandler(
     filename = function() paste0("exgraf_report_", Sys.Date(), ".docx"),
     content = function(file) {
-      if (!requireNamespace("rmarkdown", quietly = TRUE)) {
-        showNotification("La exportación a Word requiere el paquete 'rmarkdown' instalado en el servidor de despliegue.",
-                         type = "error", duration = 8)
-        return(invisible(NULL))
-      }
-
+      if (!requireNamespace("rmarkdown", quietly = TRUE)) install.packages("rmarkdown")
       fs <- final_sections()
       md_analysis   <- fs$analysis
       results_final <- fs$results
-
       citas_en_texto <- paste(
         "Citas en texto (APA 7):",
         "(Christensen & Golino, 2021; Christensen, Garrido, & Guerra-Peña, 2024; ",
@@ -2126,7 +2042,6 @@ server <- function(input, output, session) {
         "Cohen, 1988; Epskamp, 2020).",
         sep = ""
       )
-
       referencias_apa <- paste(
         "Auguie, B. (2017). gridExtra: Miscellaneous Functions for \"Grid\" Graphics. R package.",
         "",
@@ -2169,11 +2084,9 @@ server <- function(input, output, session) {
         "# Referencias\n\n",
         referencias_apa, "\n"
       )
-
       tf <- tempfile(fileext = ".Rmd")
       writeLines(rmd_text, tf, useBytes = TRUE)
       on.exit(unlink(tf), add = TRUE)
-
       rmarkdown::render(
         tf,
         output_format = rmarkdown::word_document(),
@@ -2184,7 +2097,6 @@ server <- function(input, output, session) {
       )
     }
   )
-
 
   # ----- API example code (debug) --------------------------------------------
   output$apiRCode <- renderText({
@@ -2218,10 +2130,5 @@ server <- function(input, output, session) {
     )
   })
 }
-
-
-# Operador auxiliar para valores opcionales (NULL-safe)
-`%||%` <- function(a, b) if (!is.null(a)) a else b
-
 
 shinyApp(ui, server)
