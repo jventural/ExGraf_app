@@ -1,5 +1,7 @@
 # app.R
 install.packages("httr", dependencies = T)
+# Opcional, seguro en cualquier entorno (no instala nada)
+options(repos = c(CRAN = "https://cran.rstudio.com/"))a
 library(shiny)
 library(shinydashboard)
 library(shinydashboardPlus)
@@ -2107,10 +2109,16 @@ server <- function(input, output, session) {
   output$downloadReportWord <- downloadHandler(
     filename = function() paste0("exgraf_report_", Sys.Date(), ".docx"),
     content = function(file) {
-      if (!requireNamespace("rmarkdown", quietly = TRUE)) install.packages("rmarkdown")
+      if (!requireNamespace("rmarkdown", quietly = TRUE)) {
+        showNotification("La exportación a Word requiere el paquete 'rmarkdown' instalado en el servidor de despliegue.",
+                         type = "error", duration = 8)
+        return(invisible(NULL))
+      }
+
       fs <- final_sections()
       md_analysis   <- fs$analysis
       results_final <- fs$results
+
       citas_en_texto <- paste(
         "Citas en texto (APA 7):",
         "(Christensen & Golino, 2021; Christensen, Garrido, & Guerra-Peña, 2024; ",
@@ -2118,6 +2126,7 @@ server <- function(input, output, session) {
         "Cohen, 1988; Epskamp, 2020).",
         sep = ""
       )
+
       referencias_apa <- paste(
         "Auguie, B. (2017). gridExtra: Miscellaneous Functions for \"Grid\" Graphics. R package.",
         "",
@@ -2160,9 +2169,11 @@ server <- function(input, output, session) {
         "# Referencias\n\n",
         referencias_apa, "\n"
       )
+
       tf <- tempfile(fileext = ".Rmd")
       writeLines(rmd_text, tf, useBytes = TRUE)
       on.exit(unlink(tf), add = TRUE)
+
       rmarkdown::render(
         tf,
         output_format = rmarkdown::word_document(),
@@ -2173,6 +2184,7 @@ server <- function(input, output, session) {
       )
     }
   )
+
 
   # ----- API example code (debug) --------------------------------------------
   output$apiRCode <- renderText({

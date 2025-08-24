@@ -1,0 +1,435 @@
+================================================================================
+                    GUÍA COMPLETA: CONVERTIR SHINY APP EN .EXE
+                         Aplicación de Escritorio Nativa
+================================================================================
+
+DESCRIPCIÓN:
+Esta guía te permitirá convertir cualquier aplicación Shiny en un ejecutable 
+de Windows (.exe) que funciona como una aplicación de escritorio nativa, 
+sin necesidad de archivos .bat externos ni navegadores web.
+
+REQUISITOS PREVIOS:
+==================
+1. Tener R instalado en el sistema
+2. Tener Node.js instalado (https://nodejs.org/es)
+3. Tener la aplicación Shiny funcionando correctamente
+
+PASO 1: INSTALAR NATIVEFIER
+===========================
+Abrir terminal/cmd y ejecutar:
+npm install -g nativefier
+
+PASO 2: PREPARAR ARCHIVOS AUXILIARES
+====================================
+
+2.1. Crear página HTML de inicio (startup.html):
+------------------------------------------------
+Crear un archivo llamado "startup.html" en la carpeta raíz de tu aplicación Shiny:
+
+```html
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>[NOMBRE_DE_TU_APP]</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+        }
+        
+        #loading-screen {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        
+        .loading-content {
+            text-align: center;
+            background: rgba(255,255,255,0.1);
+            padding: 40px;
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
+        }
+        
+        .spinner {
+            border: 4px solid transparent;
+            border-top: 4px solid white;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        #shiny-frame {
+            width: 100%;
+            height: 100vh;
+            border: none;
+            margin: 0;
+            padding: 0;
+            display: none;
+        }
+        
+        .error-screen {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background: linear-gradient(135deg, #ff7e7e 0%, #ff4757 100%);
+            color: white;
+        }
+        
+        .error-content {
+            text-align: center;
+            background: rgba(255,255,255,0.1);
+            padding: 40px;
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
+        }
+    </style>
+</head>
+<body>
+    <div id="loading-screen">
+        <div class="loading-content">
+            <h1 style="margin-bottom: 20px; font-size: 2.5em;">[NOMBRE_DE_TU_APP]</h1>
+            <div class="spinner"></div>
+            <p style="font-size: 1.2em;">Iniciando aplicación Shiny...</p>
+            <p style="font-size: 0.9em; margin-top: 10px; opacity: 0.8;">Por favor espera unos momentos</p>
+        </div>
+    </div>
+    
+    <iframe id="shiny-frame" frameborder="0"></iframe>
+</body>
+</html>
+```
+
+2.2. Crear script de inyección (inject-startup.js):
+---------------------------------------------------
+Crear un archivo llamado "inject-startup.js" en la carpeta raíz:
+
+```javascript
+const { spawn } = require('child_process');
+const path = require('path');
+const fs = require('fs');
+
+// Función para encontrar Rscript.exe
+function findRscript() {
+    const possiblePaths = [
+        'C:\\Program Files\\R\\R-4.4.1\\bin\\Rscript.exe',
+        'C:\\Program Files\\R\\R-4.3.3\\bin\\Rscript.exe',
+        'C:\\Program Files\\R\\R-4.3.2\\bin\\Rscript.exe',
+        'C:\\Program Files\\R\\R-4.3.1\\bin\\Rscript.exe',
+        'C:\\Program Files\\R\\R-4.3.0\\bin\\Rscript.exe',
+        'C:\\Program Files\\R\\R-4.2.3\\bin\\Rscript.exe',
+        'C:\\Program Files\\R\\R-4.2.2\\bin\\Rscript.exe',
+        'C:\\Program Files\\R\\R-4.2.1\\bin\\Rscript.exe',
+        'C:\\Program Files\\R\\R-4.2.0\\bin\\Rscript.exe'
+    ];
+
+    // Intentar encontrar R en PATH
+    try {
+        const { execSync } = require('child_process');
+        const result = execSync('where Rscript.exe', { encoding: 'utf8' });
+        if (result.trim()) {
+            return result.trim().split('\n')[0];
+        }
+    } catch (e) {
+        // Continuar con rutas predefinidas
+    }
+
+    // Buscar en rutas predefinidas
+    for (const rPath of possiblePaths) {
+        if (fs.existsSync(rPath)) {
+            return rPath;
+        }
+    }
+
+    // Buscar en el registro de Windows
+    try {
+        const { execSync } = require('child_process');
+        const result = execSync('reg query "HKLM\\SOFTWARE\\R-core\\R" /v InstallPath', { encoding: 'utf8' });
+        const match = result.match(/InstallPath\s+REG_SZ\s+(.+)/);
+        if (match) {
+            const installPath = match[1].trim();
+            const rscriptPath = path.join(installPath, 'bin', 'Rscript.exe');
+            if (fs.existsSync(rscriptPath)) {
+                return rscriptPath;
+            }
+        }
+    } catch (e) {
+        // Continuar
+    }
+
+    return null;
+}
+
+function startShinyApp() {
+    try {
+        const rscriptPath = findRscript();
+        if (!rscriptPath) {
+            console.error('No se pudo encontrar Rscript.exe');
+            return null;
+        }
+
+        // Obtener la ruta de la aplicación (ir hacia arriba desde resources/app/inject)
+        const appDir = path.join(__dirname, '..', '..', '..', '..');
+        const appDirForR = appDir.replace(/\\/g, '/');
+        
+        console.log('Iniciando aplicación Shiny...');
+        console.log('Rscript:', rscriptPath);
+        console.log('App directory:', appDir);
+
+        const rProcess = spawn(rscriptPath, [
+            '-e',
+            `shiny::runApp('${appDirForR}', port=1234, launch.browser=FALSE)`
+        ], {
+            detached: false,
+            stdio: 'pipe'
+        });
+
+        rProcess.stdout.on('data', (data) => {
+            console.log(`R: ${data}`);
+        });
+
+        rProcess.stderr.on('data', (data) => {
+            console.error(`R Error: ${data}`);
+        });
+
+        rProcess.on('close', (code) => {
+            console.log(`Proceso R terminado con código ${code}`);
+        });
+
+        return rProcess;
+    } catch (error) {
+        console.error('Error al iniciar la aplicación Shiny:', error.message);
+        return null;
+    }
+}
+
+// Variable global para almacenar el proceso R
+let rProcess = null;
+
+// Función para verificar si el servidor está disponible
+function checkServerAvailable() {
+    return fetch('http://localhost:1234')
+        .then(() => true)
+        .catch(() => false);
+}
+
+// Función para cargar Shiny en el iframe
+function loadShinyInFrame() {
+    const iframe = document.getElementById('shiny-frame');
+    const loadingScreen = document.getElementById('loading-screen');
+    
+    if (iframe && loadingScreen) {
+        iframe.src = 'http://localhost:1234';
+        iframe.style.display = 'block';
+        loadingScreen.style.display = 'none';
+        
+        iframe.onload = () => {
+            console.log('Aplicación Shiny cargada exitosamente en el frame');
+        };
+        
+        iframe.onerror = () => {
+            console.error('Error al cargar la aplicación Shiny');
+            showErrorMessage('Error al cargar la aplicación');
+        };
+    }
+}
+
+// Función para mostrar mensajes de error
+function showErrorMessage(message) {
+    document.body.innerHTML = `
+        <div class="error-screen">
+            <div class="error-content">
+                <h2 style="margin-bottom: 20px;">❌ Error</h2>
+                <p style="font-size: 1.1em;">${message}</p>
+                <p style="font-size: 0.9em; margin-top: 15px; opacity: 0.9;">
+                    Por favor asegúrate de tener R instalado correctamente.<br>
+                    Puedes descargarlo desde: <a href="https://cran.r-project.org/" style="color: #fff; text-decoration: underline;">https://cran.r-project.org/</a>
+                </p>
+            </div>
+        </div>
+    `;
+}
+
+// Iniciar cuando se carga la página
+window.addEventListener('DOMContentLoaded', () => {
+    console.log('Iniciando [NOMBRE_DE_TU_APP]...');
+    
+    // Primero verificar si el servidor ya está corriendo
+    checkServerAvailable().then(isAvailable => {
+        if (isAvailable) {
+            console.log('Servidor Shiny ya está disponible');
+            setTimeout(() => {
+                loadShinyInFrame();
+            }, 1000);
+        } else {
+            console.log('Iniciando servidor Shiny...');
+            // Iniciar la aplicación Shiny
+            rProcess = startShinyApp();
+            
+            if (rProcess) {
+                // Verificar periódicamente si el servidor está listo
+                const checkInterval = setInterval(() => {
+                    checkServerAvailable().then(isAvailable => {
+                        if (isAvailable) {
+                            clearInterval(checkInterval);
+                            console.log('Servidor Shiny está listo, cargando en frame...');
+                            setTimeout(() => {
+                                loadShinyInFrame();
+                            }, 1000);
+                        }
+                    });
+                }, 1000);
+                
+                // Timeout de seguridad después de 30 segundos
+                setTimeout(() => {
+                    clearInterval(checkInterval);
+                    loadShinyInFrame();
+                }, 30000);
+            } else {
+                showErrorMessage('No se pudo encontrar R en este sistema.');
+            }
+        }
+    });
+});
+
+// Limpiar el proceso R cuando se cierre la ventana
+window.addEventListener('beforeunload', () => {
+    if (rProcess) {
+        console.log('Cerrando proceso R...');
+        rProcess.kill();
+    }
+});
+```
+
+PASO 3: GENERAR EL EJECUTABLE INICIAL
+=====================================
+En terminal/cmd, navegar a la carpeta de tu aplicación Shiny y ejecutar:
+
+nativefier --name "[NOMBRE_DE_TU_APP]" --preload "./inject-startup.js" "about:blank"
+
+Esto creará una carpeta llamada "[NOMBRE_DE_TU_APP]-win32-x64"
+
+PASO 4: CONFIGURAR LA APLICACIÓN NATIVA
+=======================================
+
+4.1. Crear página de inicio integrada:
+--------------------------------------
+Crear la carpeta:
+[NOMBRE_DE_TU_APP]-win32-x64/resources/app/static/
+
+Dentro de esta carpeta, crear "index.html" con el mismo contenido del archivo 
+"startup.html" creado en el paso 2.1
+
+4.2. Copiar script de startup:
+-----------------------------
+Copiar el archivo "inject-startup.js" a:
+[NOMBRE_DE_TU_APP]-win32-x64/resources/app/inject/startup.js
+
+4.3. Eliminar placeholder:
+--------------------------
+Eliminar el archivo:
+[NOMBRE_DE_TU_APP]-win32-x64/resources/app/inject/_placeholder
+
+4.4. Configurar URL de inicio:
+-----------------------------
+Editar el archivo:
+[NOMBRE_DE_TU_APP]-win32-x64/resources/app/nativefier.json
+
+Cambiar la línea:
+"targetUrl":"about:blank"
+
+Por:
+"targetUrl":"file://./static/index.html"
+
+PASO 5: PERSONALIZACIÓN (OPCIONAL)
+==================================
+
+5.1. Cambiar título de la aplicación:
+------------------------------------
+En ambos archivos HTML (startup.html e index.html), reemplazar:
+[NOMBRE_DE_TU_APP] por el nombre real de tu aplicación
+
+5.2. Personalizar colores y estilos:
+-----------------------------------
+Modificar los gradientes CSS en los archivos HTML:
+- Pantalla de carga: background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+- Pantalla de error: background: linear-gradient(135deg, #ff7e7e 0%, #ff4757 100%);
+
+5.3. Cambiar puerto (si es necesario):
+-------------------------------------
+Si tu aplicación Shiny usa un puerto diferente al 1234, cambiar en:
+- inject-startup.js: puerto en la línea del `shiny::runApp`
+- inject-startup.js: puerto en todas las URLs `http://localhost:PUERTO`
+
+PASO 6: PRUEBA Y DISTRIBUCIÓN
+=============================
+
+6.1. Probar la aplicación:
+--------------------------
+Ejecutar el archivo .exe ubicado en:
+[NOMBRE_DE_TU_APP]-win32-x64/[NOMBRE_DE_TU_APP].exe
+
+6.2. Distribuir la aplicación:
+-----------------------------
+Para distribuir tu aplicación:
+- Comprime toda la carpeta [NOMBRE_DE_TU_APP]-win32-x64
+- Los usuarios solo necesitan extraer y ejecutar el .exe
+- NO es necesario que tengan Node.js instalado
+- SÍ necesitan tener R instalado
+
+ESTRUCTURA FINAL:
+================
+Tu proyecto debería tener esta estructura:
+
+mi-shiny-app/
+├── app.R (tu aplicación Shiny)
+├── startup.html
+├── inject-startup.js
+├── [NOMBRE_DE_TU_APP]-win32-x64/
+│   ├── [NOMBRE_DE_TU_APP].exe
+│   ├── resources/
+│   │   └── app/
+│   │       ├── static/
+│   │       │   └── index.html
+│   │       ├── inject/
+│   │       │   └── startup.js
+│   │       └── nativefier.json
+│   └── [otros archivos de Electron]
+
+NOTAS IMPORTANTES:
+=================
+1. El ejecutable solo funciona en Windows
+2. Los usuarios finales necesitan R instalado
+3. El puerto 1234 debe estar disponible
+4. La aplicación Shiny debe funcionar correctamente antes de convertir
+5. Si usas paquetes especiales de R, los usuarios también deben tenerlos instalados
+
+TROUBLESHOOTING:
+===============
+- Si no encuentra R: Verificar que R esté instalado y Rscript.exe esté en PATH
+- Si no carga la app: Revisar que el puerto 1234 esté libre
+- Si da error el .exe: Verificar que todos los archivos estén en las rutas correctas
+- Si la app no responde: Aumentar el timeout en inject-startup.js (línea 30000ms)
+
+================================================================================
+                            ¡APLICACIÓN LISTA!
+================================================================================
+
+Con estos pasos tendrás una aplicación Shiny convertida en un ejecutable de 
+Windows que funciona como software nativo, sin necesidad de navegadores 
+externos ni archivos .bat adicionales.
