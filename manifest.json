@@ -6101,7 +6101,7 @@
       "checksum": "4efa3477fcd29df86539cab1f8827806"
     },
     "app.R": {
-      "checksum": "a5362190c2c8674509a7a144bb3932d3"
+      "checksum": "4bcfebff6bc66f620c497234e9528f98"
     },
     "Data de prueba.xlsx": {
       "checksum": "7edb1255bd84379782ce05ef595af255"
@@ -6110,7 +6110,7 @@
       "checksum": "e00f1ebf99519690dc5104c5761d1915"
     },
     "invariance_results_shiny.rds": {
-      "checksum": "7a96ba4c44be22eadff072f08058fc27"
+      "checksum": "f8c96f43fc8b0746a1b20e077ba58cdd"
     },
     "invariance_test_results.rds": {
       "checksum": "28b223b5efba19de84f3378b8a3e94b1"
@@ -6125,7 +6125,7 @@
       "checksum": "1fc52076b3b2a28e0834eab4ef4099b7"
     },
     "writeManifest.R": {
-      "checksum": "5f0c71457df0f821ff979afc9d2d5a91"
+      "checksum": "2f42baa411144a2f6b5df4148770192d"
     }
   },
   "users": null

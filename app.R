@@ -1259,36 +1259,30 @@ server <- function(input, output, session) {
     withProgress(message="Running reliability analysis...", value=0, {
       incProgress(0.1)
       ncores <- detect_cores_for_cloud()
-
-      # seed está definido en UI de bootEGA
-      seed_val <- NULL
-      if (!is.null(input$seed)) {
-        tmp <- suppressWarnings(as.integer(input$seed))
-        if (length(tmp) == 1 && !is.na(tmp)) seed_val <- tmp
-      }
-
       args <- list(
         data      = filtered_data(),
         iter      = as.numeric(input$iter),
         model     = input$model,
         corr      = input$corr,
         algorithm = input$algorithm,
-        seed      = seed_val,
+        seed      = as.numeric(input$seed),
         type      = input$type,
         ncores    = ncores
       )
-      if (identical(input$algorithm,"leiden")) {
-        args$objective_function   <- input$objective_function   %||% NULL
-        args$resolution_parameter <- input$resolution_parameter %||% NULL
+      if (input$algorithm=="leiden") {
+        args$objective_function   <- input$objective_function
+        args$resolution_parameter <- input$resolution_parameter
       }
       incProgress(0.2)
-      res <- tryCatch(
-        do.call(EGAnet::bootEGA, compact(args)),
-        error=function(e){
-          showNotification(paste("Error in bootEGA:", e$message), type="error", duration=10)
-          NULL
-        }
-      )
+      res <- tryCatch(EGAnet::bootEGA(
+        data=args$data, iter=args$iter, model=args$model, corr=args$corr,
+        algorithm=args$algorithm, seed=args$seed, type=args$type, ncores=args$ncores,
+        resolution_parameter = args$resolution_parameter %||% NULL,
+        objective_function   = args$objective_function   %||% NULL
+      ), error=function(e){
+        showNotification(paste("Error in bootEGA:", e$message), type="error", duration=10)
+        NULL
+      })
       incProgress(0.6)
 
       if(is.null(res)) return(NULL)
@@ -1394,11 +1388,7 @@ server <- function(input, output, session) {
 
       incProgress(0.2)
 
-      seed_val <- NULL
-      if (!is.null(input$seedInv)) {
-        tmp <- suppressWarnings(as.integer(input$seedInv))
-        if (length(tmp) == 1 && !is.na(tmp)) seed_val <- tmp
-      }
+      set.seed(input$seedInv)
       RNGkind(sample.kind = "Rounding")
 
       ncores_inv <- detect_cores_for_cloud()
@@ -1410,7 +1400,7 @@ server <- function(input, output, session) {
         model = input$model,
         algorithm = input$algorithm,
         iter = as.numeric(input$iterInv),
-        seed = seed_val,
+        seed = as.numeric(input$seedInv),
         uni.method = "LE",
         configural.type = "resampling",
         configural.threshold = as.numeric(input$configural_threshold),
@@ -1418,13 +1408,13 @@ server <- function(input, output, session) {
         verbose = FALSE,
         loading.method = "revised"
       )
-      if (identical(input$algorithm, "leiden")) {
-        args_inv$resolution_parameter <- input$resolution_parameter %||% NULL
-        args_inv$objective_function   <- input$objective_function   %||% NULL
+      if (input$algorithm == "leiden") {
+        args_inv$resolution_parameter <- input$resolution_parameter
+        args_inv$objective_function   <- input$objective_function
       }
 
       res <- tryCatch(
-        do.call(EGAnet::invariance, compact(args_inv)),
+        do.call(EGAnet::invariance, args_inv),
         error = function(e) {
           showNotification(paste("Error in invariance analysis:", e$message), type = "error", duration = 10)
           NULL
@@ -1453,10 +1443,9 @@ server <- function(input, output, session) {
   output$downloadInvariancePlot <- downloadHandler(
     filename = "invariance_plot.jpg",
     content = function(file) {
-      inv <- invariance_res(); req(inv)
       ggsave(
         file,
-        plot = plot(inv, p_type = input$p_type, p_value = input$p_value),
+        plot = plot(invariance_res(), p_type = input$p_type, p_value = input$p_value),
         width = input$widthInv, height = input$heightInv, dpi = input$dpiInv, bg = "white"
       )
     }
