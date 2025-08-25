@@ -5,12 +5,15 @@ options(repos = c(CRAN = "https://cran.r-project.org"))
 
 pkgs <- c(
   "shiny","shinydashboard","shinydashboardPlus","shinyjs","shinycssloaders",
-  "shinyWidgets","readxl","EGAnet","ggplot2","dplyr","tibble","openxlsx", "labelled",
+  "shinyWidgets","readxl","EGAnet","ggplot2","dplyr","tibble","openxlsx",
   "parallel","dashboardthemes","ggstats","psych","jsonlite","httr","officer",
   "digest","commonmark"
 )
 to_install <- setdiff(pkgs, rownames(installed.packages()))
-if (length(to_install)) install.packages(to_install, dependencies = TRUE)
+if (length(to_install)) {
+  cat("Installing packages:", paste(to_install, collapse = ", "), "\n")
+  install.packages(to_install, dependencies = TRUE)
+}
 
 # ---- Helpers utilizados en todo el script (definir ANTES) ----
 `%||%` <- function(a, b) if (!is.null(a) && length(a)) a else b
@@ -39,6 +42,15 @@ library(jsonlite)
 library(httr)
 library(officer)  # For Word document generation
 library(digest)   # For caching
+library(commonmark) # For markdown processing
+
+# Verify critical packages loaded successfully
+critical_packages <- c("shiny", "EGAnet", "ggplot2", "dplyr")
+for (pkg in critical_packages) {
+  if (!requireNamespace(pkg, quietly = TRUE)) {
+    stop("Critical package '", pkg, "' failed to load. Please install it manually.")
+  }
+}
 
 # Function to generate R code for each analysis
 generate_r_code <- function(analysis_type, params, data_info) {
@@ -985,11 +997,16 @@ server <- function(input, output, session) {
 
   md_to_html <- function(x) {
     if (!nzchar(x)) return("")
-    if (requireNamespace("commonmark", quietly = TRUE)) {
-      conv <- try(commonmark::markdown_html(x, extensions = "table", smart = FALSE), silent = TRUE)
-      if (!inherits(conv, "try-error")) return(conv)
-      return(commonmark::markdown_html(x, smart = FALSE))
+    # Since commonmark is now loaded, we can use it directly
+    conv <- try(commonmark::markdown_html(x, extensions = "table", smart = FALSE), silent = TRUE)
+    if (!inherits(conv, "try-error")) {
+      return(conv)
     } else {
+      # Fallback to simple markdown processing
+      return(commonmark::markdown_html(x, smart = FALSE))
+    }
+    # Original fallback code (keeping as additional safety net)
+    if (FALSE) {
       x <- gsub("&", "&amp;", x, fixed = TRUE)
       x <- gsub("<", "&lt;",  x, fixed = TRUE)
       x <- gsub(">", "&gt;",  x, fixed = TRUE)
