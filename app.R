@@ -5,7 +5,7 @@ options(repos = c(CRAN = "https://cran.r-project.org"))
 
 pkgs <- c(
   "shiny","shinydashboard","shinydashboardPlus","shinyjs","shinycssloaders",
-  "shinyWidgets","readxl","EGAnet","ggplot2","dplyr","tibble","openxlsx",
+  "shinyWidgets","readxl","EGAnet","ggplot2","dplyr","tibble","openxlsx","labelled",
   "parallel","dashboardthemes","ggstats","psych","jsonlite","httr","officer",
   "digest","commonmark"
 )
@@ -43,6 +43,7 @@ library(httr)
 library(officer)  # For Word document generation
 library(digest)   # For caching
 library(commonmark) # For markdown processing
+library(labelled)   # Required for ggstats::gglikert
 
 # Verify critical packages loaded successfully
 critical_packages <- c("shiny", "EGAnet", "ggplot2", "dplyr")
